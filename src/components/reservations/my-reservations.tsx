@@ -140,6 +140,16 @@ function ReservationRow({
               : formatCurrency(r.totalPrice, r.listing?.currency)}
           </span>
         </div>
+        {(r.status === "pending" || r.status === "confirmed") && (
+          <div className="mt-2 inline-flex items-center gap-2 rounded-lg border bg-muted/50 px-2.5 py-1">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Pickup code
+            </span>
+            <span className="font-mono font-bold tracking-widest text-sm">
+              {r.pickupCode}
+            </span>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <Button asChild variant="outline" size="sm">

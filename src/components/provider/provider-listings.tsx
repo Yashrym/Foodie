@@ -95,9 +95,11 @@ export function ProviderListings() {
                       variant={
                         l.status === "active"
                           ? "success"
-                          : l.status === "sold-out"
-                            ? "warning"
-                            : "secondary"
+                          : l.status === "reserved"
+                            ? "default"
+                            : l.status === "sold-out"
+                              ? "warning"
+                              : "secondary"
                       }
                     >
                       {l.status}
