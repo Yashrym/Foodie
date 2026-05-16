@@ -143,11 +143,8 @@ export function ProviderReservations() {
                         {r.listing?.title}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        Reserved by{" "}
-                        <span className="font-medium text-foreground">
-                          {r.user?.name ?? r.user?.email ?? "Guest"}
-                        </span>{" "}
-                        • Qty {r.quantity} • {timeFromNow(r.createdAt)}
+                        {r.user?.name ?? r.user?.email} • Qty {r.quantity} •{" "}
+                        {timeFromNow(r.createdAt)}
                       </div>
                     </div>
                     <Badge variant="outline" className="font-mono tracking-widest">

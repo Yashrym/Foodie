@@ -52,12 +52,7 @@ export const create = mutation({
     const newRemaining = listing.quantityRemaining - args.quantity;
     await ctx.db.patch(args.listingId, {
       quantityRemaining: newRemaining,
-      status:
-        newRemaining <= 0
-          ? "sold-out"
-          : newRemaining < listing.quantityTotal
-            ? "reserved"
-            : "active",
+      status: newRemaining <= 0 ? "sold-out" : listing.status,
       updatedAt: Date.now(),
     });
 
@@ -122,15 +117,12 @@ export const cancel = mutation({
     });
     const listing = await ctx.db.get(r.listingId);
     if (listing) {
-      const newRemaining = listing.quantityRemaining + r.quantity;
       await ctx.db.patch(r.listingId, {
-        quantityRemaining: newRemaining,
+        quantityRemaining: listing.quantityRemaining + r.quantity,
         status:
-          newRemaining <= 0
-            ? "sold-out"
-            : newRemaining < listing.quantityTotal
-              ? "reserved"
-              : "active",
+          listing.status === "sold-out" && listing.quantityRemaining === 0
+            ? "active"
+            : listing.status,
         updatedAt: Date.now(),
       });
     }

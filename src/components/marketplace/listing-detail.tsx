@@ -26,14 +26,6 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useCountdown } from "@/hooks/use-countdown";
 import { useGeolocation } from "@/hooks/use-geolocation";
@@ -62,7 +54,6 @@ export function ListingDetail({
 
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const countdown = useCountdown(listing?.pickupEnd ?? Date.now());
   const pricing = listing
@@ -104,7 +95,7 @@ export function ListingDetail({
     listing.provider?._id as any,
   );
 
-  const onReserveClick = () => {
+  const onReserve = async () => {
     if (!isAuthenticated || !user) {
       router.push(`/login?callbackUrl=/marketplace/${listing._id}`);
       return;
@@ -113,11 +104,6 @@ export function ListingDetail({
       toast.error(`Pick a quantity between 1 and ${listing.quantityRemaining}`);
       return;
     }
-    setConfirmOpen(true);
-  };
-
-  const onConfirmReserve = async () => {
-    if (!user) return;
     setBusy(true);
     try {
       const res = await reserve({
@@ -126,8 +112,7 @@ export function ListingDetail({
         quantity: qty,
         actorRole: user.role === "ngo" ? "ngo" : "consumer",
       });
-      setConfirmOpen(false);
-      toast.success(`Reserved! Your pickup code is ${res.pickupCode}`);
+      toast.success(`Reserved! Pickup code ${res.pickupCode}`);
       router.push(`/reservations/${res.reservationId}`);
     } catch (e: any) {
       toast.error(e?.message ?? "Could not reserve");
@@ -356,15 +341,13 @@ export function ListingDetail({
               </div>
               <div className="text-right">
                 <div className="text-xs text-muted-foreground">Pickup ends</div>
-              
                 <div className="text-lg font-semibold inline-flex items-center gap-1.5">
                   <Timer className="h-4 w-4 text-rose-500" />
                   {countdown.expired ? "Closed" : countdown.label}
                 </div>
-              
               </div>
             </div>
-            {/*
+
             {pricing && pricing.nextStepPct && !listing.donationOnly && (
               <div className="rounded-xl bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-200 p-3 text-sm flex items-center gap-2">
                 <Clock className="h-4 w-4" />
@@ -374,7 +357,7 @@ export function ListingDetail({
                 </span>
               </div>
             )}
-            */}
+
             <Separator />
 
             <div className="space-y-3">
@@ -421,71 +404,17 @@ export function ListingDetail({
             <Button
               className="w-full"
               size="lg"
-              onClick={onReserveClick}
+              onClick={onReserve}
               disabled={busy || countdown.expired || listing.quantityRemaining < 1}
             >
               {countdown.expired
                 ? "Pickup window closed"
-                : listing.donationOnly
-                  ? "Claim for pickup"
-                  : "Reserve pickup"}
+                : busy
+                  ? "Reserving…"
+                  : listing.donationOnly
+                    ? "Claim for pickup"
+                    : "Reserve pickup"}
             </Button>
-
-            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Confirm reservation</DialogTitle>
-                  <DialogDescription>
-                    Review your pickup details before confirming. Stock is
-                    reduced immediately and you receive a shared pickup code for
-                    verification at the shop.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3 text-sm rounded-xl border p-4 bg-muted/40">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Item</span>
-                    <span className="font-medium text-right">{listing.title}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Quantity</span>
-                    <span className="font-semibold">{qty}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Shop has left</span>
-                    <span className="font-semibold">
-                      {listing.quantityRemaining} portion
-                      {listing.quantityRemaining === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">After reserve</span>
-                    <span className="font-semibold">
-                      {Math.max(0, listing.quantityRemaining - qty)} remaining
-                    </span>
-                  </div>
-                  {!listing.donationOnly && (
-                    <div className="flex justify-between border-t pt-3">
-                      <span className="text-muted-foreground">Total</span>
-                      <span className="font-bold">
-                        {formatCurrency(totalPrice, listing.currency)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <DialogFooter className="gap-2 sm:gap-0">
-                  <Button
-                    variant="outline"
-                    onClick={() => setConfirmOpen(false)}
-                    disabled={busy}
-                  >
-                    Back
-                  </Button>
-                  <Button onClick={onConfirmReserve} disabled={busy}>
-                    {busy ? "Reserving…" : "Confirm reservation"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
 
             <div className="space-y-2 text-xs text-muted-foreground">
               {distance !== undefined && (
