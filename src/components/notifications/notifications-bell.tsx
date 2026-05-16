@@ -25,7 +25,8 @@ export function NotificationsBell() {
   );
   const markAllRead = useMutation(api.notifications.markAllRead);
 
-  const unread = notifications?.filter((n) => !n.read).length ?? 0;
+  const unread =
+    (notifications as any[] | undefined)?.filter((n) => !n.read).length ?? 0;
 
   return (
     <DropdownMenu>
@@ -61,7 +62,7 @@ export function NotificationsBell() {
               You're all caught up.
             </div>
           )}
-          {(notifications ?? []).map((n) => (
+          {((notifications as any[] | undefined) ?? []).map((n) => (
             <Link
               key={n._id}
               href={n.href ?? "#"}

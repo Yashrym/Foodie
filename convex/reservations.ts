@@ -227,7 +227,12 @@ export const markPickedUp = mutation({
           providerId: listing.providerId,
           dateKey: dk,
           listingsCreated: 0,
-          ...patch,
+          listingsSold: patch.listingsSold,
+          listingsDonated: patch.listingsDonated,
+          revenue: patch.revenue,
+          mealsSaved: patch.mealsSaved,
+          co2SavedKg: patch.co2SavedKg,
+          moneySavedConsumers: patch.moneySavedConsumers,
         });
       }
     }

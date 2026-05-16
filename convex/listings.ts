@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import {
   computeUrgency,
   dateKey,
@@ -260,7 +260,7 @@ export const justAdded = query({
 });
 
 /** Cron-friendly: re-evaluate price + urgency + expire stale listings. */
-export const tickPricing = mutation({
+export const tickPricing = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();

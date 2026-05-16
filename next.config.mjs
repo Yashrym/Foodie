@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  outputFileTracingRoot: process.cwd(),
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "**.convex.cloud" },
@@ -8,9 +9,6 @@ const nextConfig = {
       { protocol: "https", hostname: "images.unsplash.com" },
       { protocol: "https", hostname: "tile.openstreetmap.org" },
     ],
-  },
-  experimental: {
-    typedRoutes: false,
   },
 };
 
