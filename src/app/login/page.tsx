@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
+import { useMutation } from "convex/react";
 import { toast } from "sonner";
 
+import { api } from "@convex/_generated/api";
 import { Logo } from "@/components/layout/logo";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,34 +21,65 @@ import {
 } from "@/components/ui/select";
 import Link from "next/link";
 
-export default function LoginPage() {
+type Role = "consumer" | "provider" | "ngo";
+
+const DEFAULT_DESTINATION: Record<Role, string> = {
+  consumer: "/marketplace",
+  provider: "/provider/dashboard",
+  ngo: "/ngo/dashboard",
+};
+
+function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const callbackUrl = params.get("callbackUrl") ?? "/marketplace";
+  const explicitCallback = params.get("callbackUrl");
+
+  const upsertUser = useMutation(api.users.upsertFromAuth);
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<"consumer" | "provider" | "ngo">("consumer");
+  const [role, setRole] = useState<Role>("consumer");
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) return;
+    const normalisedEmail = email.trim().toLowerCase();
+    if (!normalisedEmail) return;
     setSubmitting(true);
-    const res = await signIn("credentials", {
-      email,
-      name: name || email.split("@")[0],
-      role,
-      redirect: false,
-    });
-    setSubmitting(false);
-    if (res?.error) {
-      toast.error(res.error);
-      return;
+    try {
+      const displayName = name.trim() || normalisedEmail.split("@")[0];
+
+      const res = await signIn("credentials", {
+        email: normalisedEmail,
+        name: displayName,
+        role,
+        redirect: false,
+      });
+      if (res?.error) {
+        toast.error(res.error);
+        return;
+      }
+
+      // Sync DB role immediately so the destination page sees the right
+      // record on first render (avoids the "No provider profile yet"
+      // flash when an existing user picks a new role at login).
+      try {
+        await upsertUser({
+          email: normalisedEmail,
+          name: displayName,
+          role,
+        });
+      } catch (e) {
+        console.warn("Convex user upsert failed", e);
+      }
+
+      toast.success(`Welcome to Foodie, ${displayName}!`);
+      const destination = explicitCallback ?? DEFAULT_DESTINATION[role];
+      router.push(destination);
+      router.refresh();
+    } finally {
+      setSubmitting(false);
     }
-    toast.success(`Welcome to Foodie, ${name || email.split("@")[0]}!`);
-    router.push(callbackUrl);
-    router.refresh();
   };
 
   return (
@@ -113,5 +146,26 @@ export default function LoginPage() {
         </p>
       </Card>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen grid place-items-center bg-hero-gradient dark:bg-dark-hero p-6">
+          <Card className="w-full max-w-md p-8 glass-strong">
+            <div className="flex justify-center mb-6">
+              <Logo />
+            </div>
+            <p className="text-center text-sm text-muted-foreground">
+              Loading…
+            </p>
+          </Card>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -23,13 +23,30 @@ export function useCurrentUser() {
   useEffect(() => {
     if (status !== "authenticated" || !email) return;
     if (dbUser === undefined) return; // still loading
-    if (dbUser) return; // already exists
-    upsert({
-      email,
-      name: session?.user?.name ?? email,
-      image: session?.user?.image ?? undefined,
-      role: (session?.user?.role as any) ?? "consumer",
-    }).catch(() => undefined);
+
+    const desiredRole = (session?.user?.role as any) ?? "consumer";
+
+    if (dbUser === null) {
+      // First sign-in: create the Convex user record.
+      upsert({
+        email,
+        name: session?.user?.name ?? email,
+        image: session?.user?.image ?? undefined,
+        role: desiredRole,
+      }).catch(() => undefined);
+      return;
+    }
+
+    // Existing user: keep the DB role in sync with what they chose at
+    // login, so the navbar / dashboards / role guards stay coherent.
+    if (dbUser.role !== desiredRole) {
+      upsert({
+        email,
+        name: session?.user?.name ?? dbUser.name,
+        image: session?.user?.image ?? dbUser.image,
+        role: desiredRole,
+      }).catch(() => undefined);
+    }
   }, [status, email, dbUser, session, upsert]);
 
   return {

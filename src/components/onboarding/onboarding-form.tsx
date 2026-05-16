@@ -28,7 +28,6 @@ import {
   PROVIDER_TYPES,
   type Role,
 } from "@/lib/constants";
-import { useCurrentUser } from "@/hooks/use-current-user";
 
 const roleOptions: {
   id: Role;
@@ -64,10 +63,9 @@ export function OnboardingForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { data: session, status } = useSession();
-  const { user } = useCurrentUser();
+  const upsertUser = useMutation(api.users.upsertFromAuth);
   const createProvider = useMutation(api.providers.create);
   const createNgo = useMutation(api.ngos.create);
-  const setRole = useMutation(api.users.setRole);
 
   const initialRole = (params.get("role") as Role) ?? "consumer";
   const [role, setRoleLocal] = useState<Role>(initialRole);
@@ -93,27 +91,39 @@ export function OnboardingForm() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const normalisedEmail = email.trim().toLowerCase();
+    if (!normalisedEmail) {
+      toast.error("Please enter your email");
+      return;
+    }
     setSubmitting(true);
     try {
-      // 1. Make sure we're signed in (use credentials demo provider)
+      const displayName = name.trim() || normalisedEmail.split("@")[0];
+
+      // 1. Sign in (or stay signed in) via the credentials demo provider.
       if (status !== "authenticated") {
         const res = await signIn("credentials", {
-          email,
-          name: name || email.split("@")[0],
+          email: normalisedEmail,
+          name: displayName,
           role,
           redirect: false,
         });
         if (res?.error) throw new Error(res.error);
       }
 
-      // 2. Wait until Convex user is created (handled by useCurrentUser)
-      // We poll briefly here for the freshly-upserted user.
-      const dbUser = await waitFor(() => user, 8000);
+      // 2. Upsert the Convex user directly so we get a stable userId
+      //    without depending on React state to update mid-submit.
+      const userId = await upsertUser({
+        email: normalisedEmail,
+        name: displayName,
+        role,
+      });
 
       if (role === "provider") {
-        if (!dbUser) throw new Error("Could not provision your account");
+        if (!orgName.trim()) throw new Error("Business name is required");
+        if (!address.trim()) throw new Error("Address is required");
         await createProvider({
-          ownerId: dbUser._id,
+          ownerId: userId,
           name: orgName,
           type,
           description,
@@ -133,9 +143,10 @@ export function OnboardingForm() {
         toast.success("Provider profile created!");
         router.push("/provider/dashboard");
       } else if (role === "ngo") {
-        if (!dbUser) throw new Error("Could not provision your account");
+        if (!orgName.trim()) throw new Error("Organisation name is required");
+        if (!address.trim()) throw new Error("Address is required");
         await createNgo({
-          ownerId: dbUser._id,
+          ownerId: userId,
           name: orgName,
           description,
           address,
@@ -153,7 +164,6 @@ export function OnboardingForm() {
         toast.success("NGO profile created!");
         router.push("/ngo/dashboard");
       } else {
-        if (dbUser) await setRole({ userId: dbUser._id, role: "consumer" });
         toast.success("Welcome to Foodie!");
         router.push("/marketplace");
       }
@@ -393,13 +403,3 @@ export function OnboardingForm() {
   );
 }
 
-/** Tiny helper that polls until a value is defined or timeout. */
-async function waitFor<T>(getter: () => T | null | undefined, timeoutMs: number) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const v = getter();
-    if (v) return v;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return getter() ?? null;
-}
