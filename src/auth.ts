@@ -58,6 +58,10 @@ providers.push(
 export const { auth, handlers, signIn, signOut } = NextAuth({
   providers,
   session: { strategy: "jwt" },
+  // Vercel preview deployments have rotating URLs. `trustHost` makes
+  // Auth.js trust the X-Forwarded-Host header set by Vercel's proxy
+  // so callbacks resolve correctly without hard-coding AUTH_URL.
+  trustHost: true,
   pages: {
     signIn: "/login",
   },
