@@ -1,17 +1,60 @@
 import OpenAI from "openai";
 import { z } from "zod";
 
+// Coerce a value that might be a comma-separated string or an array
+// into a string[]. Tolerates the common LLM mistake of returning a
+// plain string for "ingredients" / "dietaryTags".
+const stringArray = z
+  .union([z.string(), z.array(z.any())])
+  .transform((v) => {
+    if (Array.isArray(v)) {
+      return v
+        .map((x) => String(x ?? "").trim())
+        .filter(Boolean);
+    }
+    return v
+      .split(/[,\n;]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  })
+  .default([]);
+
+// Normalise free-form urgency strings ("High", "URGENT", "needs pickup
+// soon", etc.) into our internal enum.
+const urgencyField = z
+  .union([z.string(), z.null()])
+  .transform((v): "low" | "medium" | "critical" => {
+    const norm = String(v ?? "").toLowerCase();
+    if (
+      norm.includes("crit") ||
+      norm.includes("urgent") ||
+      norm.includes("high") ||
+      norm.includes("immediate")
+    )
+      return "critical";
+    if (norm.includes("med") || norm.includes("mod")) return "medium";
+    return "low";
+  });
+
+// Robust to LLMs that return "60" (string), 60.0, or null.
+const number0to95 = z.coerce.number().min(0).max(95);
+const number0to48Hours = z.coerce.number().min(0.1).max(48);
+const number0to1 = z
+  .union([z.coerce.number(), z.literal("")])
+  .transform((v) => (typeof v === "number" ? v : 0.7))
+  .pipe(z.number().min(0).max(1));
+
 const ANALYSIS_SCHEMA = z.object({
-  category: z.string(),
-  title: z.string(),
-  description: z.string(),
-  ingredients: z.array(z.string()),
-  dietaryTags: z.array(z.string()),
-  suggestedDiscountPct: z.number().min(0).max(95),
-  suggestedPickupHours: z.number().min(0.25).max(24),
-  urgency: z.enum(["low", "medium", "critical"]),
-  confidence: z.number().min(0).max(1),
-  rationale: z.string(),
+  category: z.string().default("meals"),
+  title: z.string().default("Surplus food"),
+  description: z.string().default(""),
+  ingredients: stringArray,
+  dietaryTags: stringArray,
+  suggestedDiscountPct: number0to95.default(40),
+  suggestedPickupHours: number0to48Hours.default(2),
+  urgency: urgencyField,
+  confidence: number0to1.default(0.7),
+  rationale: z.string().default(""),
 });
 
 export type FoodAnalysis = z.infer<typeof ANALYSIS_SCHEMA>;
@@ -58,7 +101,15 @@ export async function analyzeFoodUpload(
 ): Promise<FoodAnalysis & { model: string }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return { ...heuristic(input), model: "heuristic-fallback" };
+    console.warn(
+      "[ai/analyze] OPENAI_API_KEY is not set in process.env — " +
+        "returning heuristic fallback. If you just added the key to " +
+        ".env.local, restart `npm run dev` so Next.js reloads env vars.",
+    );
+    return {
+      ...heuristic(input, "OPENAI_API_KEY not set on the server"),
+      model: "heuristic-fallback",
+    };
   }
 
   const client = new OpenAI({ apiKey });
@@ -78,6 +129,9 @@ export async function analyzeFoodUpload(
   }
 
   try {
+    console.log(
+      `[ai/analyze] Calling OpenAI gpt-4o-mini (image=${Boolean(imageSrc)})`,
+    );
     const completion = await client.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
@@ -89,14 +143,49 @@ export async function analyzeFoodUpload(
     });
 
     const raw = completion.choices[0]?.message?.content ?? "{}";
-    const parsed = ANALYSIS_SCHEMA.safeParse(JSON.parse(raw));
-    if (!parsed.success) {
-      return { ...heuristic(input), model: "heuristic-fallback" };
+    let asJson: unknown;
+    try {
+      asJson = JSON.parse(raw);
+    } catch (parseErr) {
+      console.error(
+        "[ai/analyze] OpenAI returned non-JSON content:",
+        raw.slice(0, 400),
+      );
+      return {
+        ...heuristic(input, "OpenAI response was not valid JSON"),
+        model: "heuristic-fallback",
+      };
     }
+
+    const parsed = ANALYSIS_SCHEMA.safeParse(asJson);
+    if (!parsed.success) {
+      console.error(
+        "[ai/analyze] OpenAI JSON did not match schema:",
+        parsed.error.issues,
+      );
+      return {
+        ...heuristic(input, "OpenAI JSON did not match expected schema"),
+        model: "heuristic-fallback",
+      };
+    }
+    console.log(
+      `[ai/analyze] OK · category=${parsed.data.category} discount=${parsed.data.suggestedDiscountPct}% urgency=${parsed.data.urgency}`,
+    );
     return { ...parsed.data, model: "gpt-4o-mini" };
-  } catch (err) {
-    console.error("OpenAI vision analysis failed", err);
-    return { ...heuristic(input), model: "heuristic-fallback" };
+  } catch (err: any) {
+    const status = err?.status ?? err?.response?.status;
+    const code = err?.code ?? err?.error?.code;
+    const msg = err?.message ?? String(err);
+    console.error(
+      `[ai/analyze] OpenAI call failed (status=${status} code=${code}): ${msg}`,
+    );
+    return {
+      ...heuristic(
+        input,
+        `OpenAI call failed: ${status ? `HTTP ${status} ` : ""}${msg}`,
+      ),
+      model: "heuristic-fallback",
+    };
   }
 }
 
@@ -117,7 +206,7 @@ function buildUserPrompt(input: AnalyzeInput) {
 }
 
 /** Lightweight rules-only fallback so the app never blocks on AI. */
-function heuristic(input: AnalyzeInput): FoodAnalysis {
+function heuristic(input: AnalyzeInput, reason?: string): FoodAnalysis {
   const name = (input.foodName ?? "Surplus food").trim();
   const minsAgo = input.createdMinutesAgo ?? 60;
   const urgency: FoodAnalysis["urgency"] =
@@ -151,7 +240,8 @@ function heuristic(input: AnalyzeInput): FoodAnalysis {
     suggestedPickupHours: hours,
     urgency,
     confidence: 0.4,
-    rationale:
-      "Heuristic fallback used because OPENAI_API_KEY isn't set or the AI call failed. Adjust manually before publishing.",
+    rationale: reason
+      ? `Heuristic fallback used: ${reason}. Adjust manually before publishing.`
+      : "Heuristic fallback used. Adjust manually before publishing.",
   };
 }

@@ -11,6 +11,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const hasKey = Boolean(process.env.OPENAI_API_KEY);
+  console.log(
+    `[ai/analyze] POST · user=${session.user.email} hasOpenAIKey=${hasKey}`,
+  );
+
   const body = await req.json().catch(() => ({}));
   const result = await analyzeFoodUpload({
     imageDataUrl: body.imageDataUrl,
@@ -25,4 +30,14 @@ export async function POST(req: Request) {
   });
 
   return NextResponse.json({ analysis: result });
+}
+
+export async function GET() {
+  // Tiny diagnostic so you can verify the server has the key loaded
+  // without making a real OpenAI call. Hit GET /api/ai/analyze.
+  return NextResponse.json({
+    ok: true,
+    hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY),
+    keyPrefix: process.env.OPENAI_API_KEY?.slice(0, 7) ?? null,
+  });
 }
