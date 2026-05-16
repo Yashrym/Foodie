@@ -104,27 +104,106 @@ export const create = mutation({
 });
 
 export const cancel = mutation({
-  args: { reservationId: v.id("reservations") },
-  handler: async (ctx, { reservationId }) => {
+  args: {
+    reservationId: v.id("reservations"),
+    // Who initiated the cancel? Drives which side gets a notification.
+    cancelledBy: v.optional(
+      v.union(
+        v.literal("provider"),
+        v.literal("consumer"),
+        v.literal("system"),
+      ),
+    ),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, { reservationId, cancelledBy = "consumer", reason }) => {
     const r = await ctx.db.get(reservationId);
     if (!r) return;
     if (r.status === "picked-up") {
       throw new Error("Reservation already completed");
     }
+    if (r.status === "cancelled") return; // idempotent
+
     await ctx.db.patch(reservationId, {
       status: "cancelled",
       cancelledAt: Date.now(),
     });
+
     const listing = await ctx.db.get(r.listingId);
     if (listing) {
       await ctx.db.patch(r.listingId, {
         quantityRemaining: listing.quantityRemaining + r.quantity,
         status:
-          listing.status === "sold-out" && listing.quantityRemaining === 0
+          listing.status === "sold-out"
             ? "active"
             : listing.status,
         updatedAt: Date.now(),
       });
+    }
+
+    const listingTitle = listing?.title ?? "your reservation";
+    const now = Date.now();
+
+    if (cancelledBy === "provider") {
+      // Provider rejected → tell the consumer.
+      await ctx.db.insert("notifications", {
+        userId: r.userId,
+        type: "reservation-update",
+        title: `Reservation declined • ${listingTitle}`,
+        body: reason
+          ? `The provider can't fulfil this reservation: "${reason}". Your portions were released back to the marketplace.`
+          : `Sorry — the provider declined this reservation. Your portions were released back to the marketplace.`,
+        relatedListingId: r.listingId,
+        relatedReservationId: reservationId,
+        href: `/reservations/${reservationId}`,
+        read: false,
+        createdAt: now,
+      });
+    } else if (cancelledBy === "consumer") {
+      // Consumer self-cancelled → tell the provider.
+      const provider = listing ? await ctx.db.get(listing.providerId) : null;
+      if (provider) {
+        await ctx.db.insert("notifications", {
+          userId: provider.ownerId,
+          type: "reservation-update",
+          title: `Reservation cancelled • ${listingTitle}`,
+          body: `The customer cancelled. ${r.quantity} portion(s) are back in your inventory.`,
+          relatedListingId: r.listingId,
+          relatedReservationId: reservationId,
+          href: `/provider/reservations`,
+          read: false,
+          createdAt: now,
+        });
+      }
+    } else {
+      // System cancel (e.g. cron expiry) → tell both sides.
+      await ctx.db.insert("notifications", {
+        userId: r.userId,
+        type: "reservation-update",
+        title: `Reservation expired • ${listingTitle}`,
+        body:
+          reason ??
+          "Your reservation window elapsed and the portions were released.",
+        relatedListingId: r.listingId,
+        relatedReservationId: reservationId,
+        href: `/reservations/${reservationId}`,
+        read: false,
+        createdAt: now,
+      });
+      const provider = listing ? await ctx.db.get(listing.providerId) : null;
+      if (provider) {
+        await ctx.db.insert("notifications", {
+          userId: provider.ownerId,
+          type: "reservation-update",
+          title: `Reservation expired • ${listingTitle}`,
+          body: `${r.quantity} portion(s) returned to your inventory.`,
+          relatedListingId: r.listingId,
+          relatedReservationId: reservationId,
+          href: `/provider/reservations`,
+          read: false,
+          createdAt: now,
+        });
+      }
     }
   },
 });
@@ -132,9 +211,27 @@ export const cancel = mutation({
 export const confirm = mutation({
   args: { reservationId: v.id("reservations") },
   handler: async (ctx, { reservationId }) => {
+    const r = await ctx.db.get(reservationId);
+    if (!r) return;
+    if (r.status === "confirmed" || r.status === "picked-up") return;
+
     await ctx.db.patch(reservationId, {
       status: "confirmed",
       confirmedAt: Date.now(),
+    });
+
+    // Tell the consumer the provider accepted.
+    const listing = await ctx.db.get(r.listingId);
+    await ctx.db.insert("notifications", {
+      userId: r.userId,
+      type: "reservation-update",
+      title: `Reservation accepted • ${listing?.title ?? "your reservation"}`,
+      body: `The provider confirmed your pickup. Show code ${r.pickupCode} at the counter.`,
+      relatedListingId: r.listingId,
+      relatedReservationId: reservationId,
+      href: `/reservations/${reservationId}`,
+      read: false,
+      createdAt: Date.now(),
     });
   },
 });

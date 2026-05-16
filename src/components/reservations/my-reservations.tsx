@@ -47,9 +47,19 @@ export function MyReservations() {
   if (reservations === undefined) return <Skeleton className="h-48 w-full" />;
 
   const list = reservations as any[];
-  const active = list.filter(
-    (r: any) => r.status === "pending" || r.status === "confirmed",
-  );
+  // Show pending + confirmed always, plus very recently
+  // cancelled/expired ones (last 7 days) so a consumer immediately sees
+  // when a provider declines their booking.
+  const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const active = list.filter((r: any) => {
+    if (r.status === "pending" || r.status === "confirmed") return true;
+    if (r.status === "cancelled" || r.status === "expired") {
+      const ts = r.cancelledAt ?? r.createdAt;
+      return now - ts < RECENT_WINDOW_MS;
+    }
+    return false;
+  });
   const history = list.filter(
     (r: any) =>
       r.status === "picked-up" ||
@@ -79,10 +89,16 @@ export function MyReservations() {
             <ReservationRow
               key={r._id}
               r={r}
-              onCancel={(id) =>
-                cancel({ reservationId: id }).then(() =>
-                  toast.success("Reservation cancelled"),
-                )
+              onCancel={
+                r.status === "pending" || r.status === "confirmed"
+                  ? (id) =>
+                      cancel({
+                        reservationId: id,
+                        cancelledBy: "consumer",
+                      }).then(() =>
+                        toast.success("Reservation cancelled"),
+                      )
+                  : undefined
               }
             />
           ))}

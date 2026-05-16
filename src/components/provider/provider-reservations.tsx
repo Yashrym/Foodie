@@ -173,7 +173,10 @@ export function ProviderReservations() {
                           variant="ghost"
                           className="text-rose-500"
                           onClick={() =>
-                            cancel({ reservationId: r._id }).then(() =>
+                            cancel({
+                              reservationId: r._id,
+                              cancelledBy: "provider",
+                            }).then(() =>
                               toast.success("Reservation rejected"),
                             )
                           }
